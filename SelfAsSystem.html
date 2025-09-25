@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Particle Circle with Moving Letters</title>
+<style>
+  body {
+    margin: 0;
+    background: black;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
+
+// ---------------- 粒子 & 文本配置 ----------------
+const baseRadius = 1;
+const scaleFactor = 3.6;
+const jitterAmp = 1.0;
+const particles = [];
+
+let textsOnParticles = [];
+let groupCounter = 0;
+const fadeSpeed = 0.005;
+const appearSpeed = 0.02;
+let batchCount = 0;
+
+// ---------------- 分割比例 & 标签 ----------------
+const divisions = [30, 8, 40, 15, 7]; 
+const labels    = ["Shopping", "The New School", "Entertainment", "Life", "Other"];
+const sum = divisions.reduce((a, b) => a + b, 0);
+
+// 蓝紫色系
+const bluePurpleColors = [
+  "rgb(0,191,255)",   // deepskyblue
+  "rgb(65,105,225)",  // royalblue
+  "rgb(123,104,238)", // mediumslateblue
+  "rgb(138,43,226)",  // blueviolet
+  "rgb(106,90,205)",  // slateblue
+  "rgb(72,61,139)",   // darkslateblue
+  "rgb(147,112,219)"  // mediumpurple
+];
+
+// ---------------- 添加一批粒子 ----------------
+function addParticleBatch() {
+  batchCount++;
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const radius = Math.min(canvas.width, canvas.height) * 0.4;
+
+  const newBatch = [];
+  for (let i = 0; i < 9; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * radius;
+    const isBig = batchCount > 1 ? Math.random() < 0.12 : false;
+    const p = {
+      x: cx + Math.cos(angle) * r,
+      y: cy + Math.sin(angle) * r,
+      jitter: Math.random() * 1000,
+      isBig,
+      groupId: groupCounter++
+    };
+    particles.push(p);
+    newBatch.push(p);
+  }
+
+  // 延迟 1 秒再加蓝色文字
+  setTimeout(() => addTextsForParticles(newBatch), 1000);
+}
+
+// ---------------- 为粒子添加文字 ----------------
+async function addTextsForParticles(particlesSubset) {
+  try {
+    const res = await fetch("data.text");
+    const text = await res.text();
+    const chars = text.replace(/\s+/g, "").split("");
+
+    for (let p of particlesSubset) {
+      const howMany = p.isBig ? 15 : 5;
+      for (let k = 0; k < howMany; k++) {
+        const char = chars[Math.floor(Math.random() * chars.length)] || "?";
+
+        // 颜色逻辑：大粒子随机蓝紫色，小粒子固定蓝色
+        const baseColor = p.isBig
+          ? bluePurpleColors[Math.floor(Math.random() * bluePurpleColors.length)]
+          : "rgb(0,191,255)";
+
+        // 相对偏移
+        const offsetX = (Math.random() - 0.5) * 40;
+        const offsetY = (Math.random() - 0.5) * 40;
+
+        textsOnParticles.push({
+          char,
+          particle: p,
+          offsetX,
+          offsetY,
+          alpha: 0,
+          appearing: true,
+          fading: false,
+          groupId: p.groupId,
+          baseColor
+        });
+      }
+    }
+  } catch (err) {
+    console.error("加载 data.text 出错:", err);
+  }
+}
+
+// ---------------- 绘制分割线 + 标签 ----------------
+function drawDivisionsAndLabels(cx, cy, radius) {
+  let startAngle = -Math.PI / 2; 
+  const labelOffset = 32;
+  ctx.strokeStyle = "white";
+  ctx.lineWidth = 2;
+
+  for (let i = 0; i < divisions.length; i++) {
+    const sweep = (divisions[i] / sum) * Math.PI * 2;
+    const endAngle = startAngle + sweep;
+
+    // 分割线
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(endAngle) * radius, cy + Math.sin(endAngle) * radius);
+    ctx.stroke();
+
+    // 扇区中点放置标签
+    const mid = startAngle + sweep / 2;
+    const lx = cx + Math.cos(mid) * (radius + labelOffset);
+    const ly = cy + Math.sin(mid) * (radius + labelOffset);
+
+    // 标签文本
+    ctx.save();
+    ctx.fillStyle = "white";
+    ctx.font = "16px Arial";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = Math.cos(mid) >= 0 ? "left" : "right";
+    ctx.fillText(labels[i], lx + (Math.cos(mid) >= 0 ? 8 : -8), ly);
+    ctx.restore();
+
+    startAngle = endAngle;
+  }
+}
+
+// ---------------- 动画循环 ----------------
+function draw(time) {
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const radius = Math.min(canvas.width, canvas.height) * 0.4;
+
+  // 画粒子
+  for (let p of particles) {
+    const jx = Math.sin(time * 0.002 + p.jitter) * jitterAmp;
+    const jy = Math.cos(time * 0.002 + p.jitter) * jitterAmp;
+
+    ctx.fillStyle = "orange";
+    ctx.beginPath();
+    const r = p.isBig ? baseRadius * scaleFactor : baseRadius;
+    ctx.arc(p.x + jx, p.y + jy, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 保存当前坐标
+    p.currentX = p.x + jx;
+    p.currentY = p.y + jy;
+  }
+
+  // 画文字
+  ctx.font = "16px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  textsOnParticles = textsOnParticles.filter(t => {
+    if (t.appearing) {
+      t.alpha += appearSpeed;
+      if (t.alpha >= 1) { t.alpha = 1; t.appearing = false; }
+    } else if (t.fading) {
+      t.alpha -= fadeSpeed;
+    }
+    if (t.alpha <= 0) return false;
+
+    const x = t.particle.currentX + t.offsetX;
+    const y = t.particle.currentY + t.offsetY;
+
+    ctx.fillStyle = t.baseColor.replace("rgb", "rgba").replace(")", `,${t.alpha})`);
+    ctx.fillText(t.char, x, y);
+    return true;
+  });
+
+  // 分割线 + 标签
+  drawDivisionsAndLabels(cx, cy, radius);
+
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+// ---------------- 时间控制 ----------------
+addParticleBatch();
+setInterval(() => addParticleBatch(), 3000);
+
+// ✅ 每 4 秒随机让 4 组淡出
+setInterval(() => {
+  const groups = [...new Set(textsOnParticles.filter(t => !t.fading).map(t => t.groupId))];
+  if (groups.length === 0) return;
+  const toFade = [];
+  while (toFade.length < 4 && groups.length > 0) {
+    const idx = Math.floor(Math.random() * groups.length);
+    toFade.push(groups[idx]);
+    groups.splice(idx, 1);
+  }
+  textsOnParticles.forEach(t => {
+    if (toFade.includes(t.groupId)) t.fading = true;
+  });
+}, 3000);
+</script>
+</body>
+</html>
